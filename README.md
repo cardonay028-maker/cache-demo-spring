@@ -1,107 +1,66 @@
-# Caché en Spring Boot: lectura masiva de registros y comparación de tiempos
+Caché con Java y Spring Boot
 
-**Materia:** ISWZ2202 – Diseño y Arquitectura de Software · Ingeniería de Software
-**Objetivo:** reforzar Java y Spring Framework leyendo muchos registros de una base de datos, implementando caché y comparando los tiempos de acceso.
+Actividad de ISWZ2202 - Diseño y Arquitectura de Software (Ingeniería de Software). Estudiante: Yair Cardona
 
-## Estructura
+La aplicación lee muchos registros de una base de datos, usa caché y compara el tiempo de acceso con y sin caché. El front lo generó una IA a partir del backend ya terminado.
 
-```
-cache-demo-spring/
-├── backend/    # Spring Boot 3 + Spring Data JPA + H2 + Caffeine (Java 17)
-└── frontend/   # index.html (HTML + CSS + JS puro, sin build)
-```
 
-## Cómo funciona
+Estructura
+backend/   -> proyecto Spring Boot
+frontend/  -> index.html
+docs/      -> capturas de pantalla
 
-1. Al arrancar por primera vez, `DataSeeder` inserta **200.000 productos** (10 categorías → ~20.000 registros por categoría) en una base H2 guardada en `backend/data/`.
-2. `GET /api/products/no-cache?category=X` lee **todos** los productos de la categoría directamente de la BD.
-3. `GET /api/products/cached?category=X` hace lo mismo, pero el método del servicio lleva `@Cacheable`: la primera vez va a la BD (*cache miss*) y las siguientes devuelven el resultado desde memoria (*cache hit*, Caffeine).
-4. `GET /api/benchmark?category=X&runs=5` ejecuta N consultas sin caché y N con caché y devuelve todos los tiempos.
-5. `DELETE /api/cache` vacía la caché.
+Cómo ejecutarlo
+Abrir la carpeta backend en IntelliJ y ejecutar CacheDemoApplication (o usar mvn spring-boot:run). La primera vez se generan 200.000 productos.
+Comprobar en http://localhost:8080/api/categories que responde.
 
-El tiempo se mide en el servidor con `System.nanoTime()` alrededor de la llamada al servicio, y el front además muestra el tiempo total de ida y vuelta.
+Abrir frontend/index.html con el servidor de IntelliJ, o desde la carpeta frontend ejecutar python -m http.server 5500 y entrar a http://localhost:5500.
 
-## Requisitos
+Servicios
+Servicio	Qué hace
+GET /api/categories	Lista las categorías
+GET /api/products/no-cache?category=X	Lee los productos de la categoría directo de la base de datos
+GET /api/products/cached?category=X	Lo mismo, pero usando la caché
+GET /api/benchmark?category=X&runs=N	Hace N consultas de cada tipo y devuelve los tiempos
+DELETE /api/cache	Borra la caché
 
-- JDK 17 o superior
-- Maven 3.9+ (o abrir `backend/` en IntelliJ IDEA / Eclipse / VS Code y ejecutar `CacheDemoApplication`)
+Cómo funciona la caché
 
-## Ejecución
+Se activó con @EnableCaching y se puso @Cacheable en el método del servicio que busca por categoría. La primera consulta de una categoría va a la base de datos (miss) y las siguientes devuelven la lista guardada en memoria (hit). La caché expira a los 10 minutos.
 
-**1. Backend** (puerto 8080)
+CORS
 
-```bash
-cd backend
-mvn spring-boot:run
-```
+El front y el backend están en puertos distintos, así que el navegador los trata como orígenes diferentes y bloquea la respuesta si el backend no la permite.
 
-La primera vez tarda unos segundos extra mientras genera los datos (se ve en el log: *"Listo: 200000 registros insertados…"*).
+<img width="952" height="770" alt="Captura de pantalla 2026-10-14 182624" src="https://github.com/user-attachments/assets/a1208291-6bf6-4d93-9155-f6433d810f1b" />
 
-**2. Frontend** (puerto 5500, un origen distinto al del backend a propósito)
 
-```bash
-cd frontend
-python -m http.server 5500
-```
+Se resolvió con la clase CorsConfig, que permite los orígenes escritos en application.properties (app.cors.allowed-origins) para las rutas /api. Hubo que agregar el puerto 63342 (el de IntelliJ) y reiniciar el backend.
 
-Abrir <http://localhost:5500>. También sirve la extensión *Live Server* de VS Code (puerto 5500 por defecto).
+<img width="939" height="943" alt="Captura de pantalla 2026-10-14 182323" src="https://github.com/user-attachments/assets/6d02fad7-c0c1-4403-a45b-3db140301df8" />
 
-> No abras `index.html` con doble clic (`file://`): el origen sería `null` y CORS lo rechazaría.
+Resultados
 
-## CORS: el problema y cómo se resuelve
+Prueba con la categoría Alimentos (20.000 registros) y 5 repeticiones:
 
-**Problema.** Un origen es la combinación `esquema + host + puerto`. El front en `http://localhost:5500` y el backend en `http://localhost:8080` son orígenes distintos, así que la *same-origin policy* del navegador bloquea la respuesta del backend y en la consola aparece algo como:
+	Promedio
+Sin caché	57,4 ms
+Con caché, primera consulta (miss)	57,8 ms
+Con caché, siguientes consultas (hit)	0,06 ms
 
-```
-Access to fetch at 'http://localhost:8080/api/...' from origin 'http://localhost:5500'
-has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present...
-```
+La caché fue unas 929 veces más rápida en el servidor.
 
-Con peticiones como `DELETE` el navegador además envía antes una petición **preflight** (`OPTIONS`) para preguntar si el método está permitido.
+<img width="939" height="943" alt="Captura de pantalla 2026-10-14 182323" src="https://github.com/user-attachments/assets/5a2fc6a8-1b5f-4814-b8c4-e81acb3ace10" />
 
-**Soluciones en desarrollo** (de la más usada a la menos):
+<img width="900" height="552" alt="Captura de pantalla 2026-10-14 182338" src="https://github.com/user-attachments/assets/098f1e50-b056-4a3a-a16c-6cf1a6f750bf" />
 
-| Opción | Cómo | Cuándo usarla |
-|---|---|---|
-| **Configuración global en Spring** (la usada aquí) | `CorsConfig` con `WebMvcConfigurer.addCorsMappings` y los orígenes en `application.properties` | Front y back separados; lo más claro y mantenible |
-| `@CrossOrigin(origins = "...")` | Anotación en un controlador o método | Casos puntuales |
-| Proxy del servidor de desarrollo | Vite: `server.proxy = { '/api': 'http://localhost:8080' }`; Angular: `proxy.conf.json`; el navegador ve un solo origen | Frontends con bundler (React, Vue, Angular) |
-| Servir el front desde Spring | Copiar el HTML a `src/main/resources/static/` | Mismo origen, no hay CORS |
+<img width="898" height="924" alt="Captura de pantalla 2026-10-14 182356" src="https://github.com/user-attachments/assets/fb59f9e2-2201-472e-91ed-b1230a76f6c6" />
 
-**Qué evitar:** `allowedOrigins("*")` en producción. Si se usan cookies o `Authorization` con credenciales, `*` ni siquiera es válido: hay que listar orígenes explícitos y `allowCredentials(true)`. En producción se suele poner un API gateway / reverse proxy (Nginx) para que front y API compartan origen.
 
-## Resultados (completar con tus mediciones)
+Conclusión
 
-Ejecuta el benchmark en la interfaz (5 repeticiones, categoría `Electronica`) y anota los valores:
+La caché reduce mucho el tiempo de lectura, pero usa memoria y los datos pueden quedar desactualizados si cambian en la base de datos. Sirve más para datos que se consultan seguido y casi no cambian.
 
-| Métrica | Sin caché | Con caché |
-|---|---|---|
-| Registros leídos | 20.000 | 20.000 |
-| Corrida 1 | ___ ms | ___ ms (miss) |
-| Corridas 2–5 (promedio) | ___ ms | ___ ms (hits) |
-| Mejora (veces más rápido) | – | ___ × |
+Uso de IA
 
-**Análisis sugerido:**
-- El *cache miss* cuesta igual o un poco más que una consulta normal, porque además de leer la BD guarda el resultado.
-- Los *hits* devuelven la lista que ya está en memoria, por eso el tiempo cae a una fracción de milisegundo.
-- H2 está en el mismo equipo y es muy rápido; con un motor remoto (PostgreSQL/MySQL en otra máquina) la diferencia sería mucho mayor por la latencia de red.
-- Riesgo de la caché: **datos obsoletos**. Aquí caducan a los 10 minutos (`expireAfterWrite=10m`) y pueden vaciarse con `DELETE /api/cache`; en un caso real habría que invalidarla (`@CacheEvict`) al insertar o modificar productos.
-- Limitación: el proxy de Spring solo aplica `@Cacheable` a llamadas que entran desde otro bean (*self-invocation*).
-
-## Subir a GitHub
-
-```bash
-cd cache-demo-spring
-git init
-git add .
-git commit -m "Actividad: caché con Spring Boot y front de comparación"
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/cache-demo-spring.git
-git push -u origin main
-```
-
-(Antes crea el repositorio vacío `cache-demo-spring` en github.com.) Pega el enlace en la consigna.
-
-## Prompt usado para generar el front con IA
-
-> Genera un front en HTML, CSS y JavaScript puro que consuma mi API REST de Spring Boot en `http://localhost:8080`: `GET /api/categories`, `GET /api/products/no-cache?category=`, `GET /api/products/cached?category=`, `GET /api/benchmark?category=&runs=` y `DELETE /api/cache`. Debe permitir elegir categoría, mostrar el tiempo de servidor y el tiempo total de cada consulta, un historial, una vista previa de los registros y un gráfico de barras con el benchmark. Si falla por CORS, muestra un mensaje claro.
+El front se generó con IA como pedía la actividad.
