@@ -4,7 +4,6 @@ Actividad de ISWZ2202 - Diseño y Arquitectura de Software (Ingeniería de Softw
 
 La aplicación lee muchos registros de una base de datos, usa caché y compara el tiempo de acceso con y sin caché. El front lo generó una IA a partir del backend ya terminado.
 
-
 Estructura
 backend/   -> proyecto Spring Boot
 frontend/  -> index.html
