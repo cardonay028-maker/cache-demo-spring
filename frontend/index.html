@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caché en Spring: comparación de tiempos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #14212b;
+    --muted: #5a6b78;
+    --paper: #eef2f5;
+    --panel: #ffffff;
+    --line: #d3dce3;
+    --db: #c2610c;
+    --db-soft: #fbe9d9;
+    --cache: #0b6e8a;
+    --cache-soft: #d9eef4;
+    --danger: #a32121;
+    --radius: 6px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e6edf2;
+      --muted: #94a4b0;
+      --paper: #0f1a22;
+      --panel: #16242e;
+      --line: #2b3b47;
+      --db: #f0954a;
+      --db-soft: #3a2616;
+      --cache: #4cc3e0;
+      --cache-soft: #12323c;
+      --danger: #ff8a8a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { font-family: "Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { margin: 0; background: var(--paper); color: var(--ink); line-height: 1.5; }
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: clamp(1.6rem, 3vw, 2.2rem); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; font-weight: 600; margin: 0 0 12px; }
+  .lead { color: var(--muted); margin: 0 0 24px; max-width: 70ch; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 18px; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+  input, select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); font: inherit; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  button { font: inherit; font-weight: 600; padding: 9px 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: progress; }
+  button.db { background: var(--db); border-color: var(--db); color: #fff; }
+  button.cache { background: var(--cache); border-color: var(--cache); color: #fff; }
+  button.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  :focus-visible { outline: 3px solid var(--cache); outline-offset: 2px; }
+
+  #status { min-height: 1.4em; margin: 0 0 14px; font-size: .92rem; color: var(--muted); }
+  #status.error { color: var(--danger); font-weight: 600; }
+
+  .bars { display: grid; gap: 6px; }
+  .bar-row { display: grid; grid-template-columns: 190px 1fr 90px; gap: 10px; align-items: center; font-size: .88rem; }
+  .bar-track { background: var(--paper); border-radius: 3px; height: 18px; overflow: hidden; }
+  .bar { height: 100%; min-width: 2px; border-radius: 3px; }
+  .bar.db { background: var(--db); }
+  .bar.cache { background: var(--cache); }
+  .bar-val { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .verdict { margin: 16px 0 0; padding: 12px 14px; border-left: 4px solid var(--cache); background: var(--cache-soft); border-radius: 0 var(--radius) var(--radius) 0; }
+  .verdict strong { font-size: 1.15rem; }
+
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-weight: 600; color: var(--muted); }
+  td.num, th.num { text-align: right; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .78rem; font-weight: 600; }
+  .tag.db { background: var(--db-soft); color: var(--db); }
+  .tag.cache { background: var(--cache-soft); color: var(--cache); }
+  .empty { color: var(--muted); margin: 0; }
+
+  @media (max-width: 620px) {
+    .bar-row { grid-template-columns: 1fr 70px; }
+    .bar-row .bar-label { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Caché en Spring: base de datos vs. memoria</h1>
+  <p class="lead">Consulta todos los productos de una categoría y compara cuánto tarda el backend al leer de la base de datos frente a leer de la caché.</p>
+
+  <section class="panel" aria-labelledby="t-controls">
+    <h2 id="t-controls">Consulta</h2>
+    <div class="controls">
+      <div>
+        <label for="apiBase">URL del backend</label>
+        <input id="apiBase" type="url" value="http://localhost:8080">
+      </div>
+      <div>
+        <label for="category">Categoría</label>
+        <select id="category"><option>Cargando…</option></select>
+      </div>
+      <div>
+        <label for="runs">Repeticiones del benchmark</label>
+        <input id="runs" type="number" min="2" max="20" value="5">
+      </div>
+    </div>
+    <div class="buttons">
+      <button class="db" id="btnNoCache">Consultar sin caché</button>
+      <button class="cache" id="btnCached">Consultar con caché</button>
+      <button class="primary" id="btnBench">Ejecutar benchmark</button>
+      <button id="btnClear">Limpiar caché</button>
+    </div>
+  </section>
+
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <section class="panel" aria-labelledby="t-bench">
+    <h2 id="t-bench">Benchmark</h2>
+    <div id="bench"><p class="empty">Ejecuta el benchmark para ver los tiempos de cada repetición.</p></div>
+  </section>
+
+  <section class="panel" aria-labelledby="t-log">
+    <h2 id="t-log">Historial de consultas</h2>
+    <div class="table-wrap" id="log"><p class="empty">Aún no hay consultas.</p></div>
+  </section>
+
+  <section class="panel" aria-labelledby="t-preview">
+    <h2 id="t-preview">Vista previa de registros</h2>
+    <div class="table-wrap" id="preview"><p class="empty">Haz una consulta para ver los primeros registros.</p></div>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const buttons = ["btnNoCache", "btnCached", "btnBench", "btnClear"].map($);
+  const history = [];
+
+  const base = () => $("apiBase").value.trim().replace(/\/+$/, "");
+  const fmt = (ms) => (ms < 10 ? ms.toFixed(2) : ms.toFixed(1)) + " ms";
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function setStatus(text, isError = false) {
+    const el = $("status");
+    el.textContent = text;
+    el.className = isError ? "error" : "";
+  }
+
+  async function api(path, options) {
+    const t0 = performance.now();
+    let res;
+    try {
+      res = await fetch(base() + path, options);
+    } catch (e) {
+      throw new Error("No se pudo conectar con el backend. Revisa que esté corriendo en " + base() +
+        " y que su origen (" + location.origin + ") esté permitido en app.cors.allowed-origins (CORS).");
+    }
+    if (!res.ok) throw new Error("El backend respondió " + res.status + " en " + path);
+    const data = await res.json();
+    return { data, roundTripMs: performance.now() - t0 };
+  }
+
+  async function run(label, task) {
+    buttons.forEach((b) => (b.disabled = true));
+    setStatus(label + "…");
+    try {
+      await task();
+    } catch (e) {
+      setStatus(e.message, true);
+    } finally {
+      buttons.forEach((b) => (b.disabled = false));
+    }
+  }
+
+  async function loadCategories() {
+    try {
+      const { data } = await api("/api/categories");
+      $("category").innerHTML = data.map((c) => `<option>${esc(c)}</option>`).join("");
+      setStatus("Backend conectado. Elige una categoría y consulta.");
+    } catch (e) {
+      $("category").innerHTML = "<option>Sin conexión</option>";
+      setStatus(e.message, true);
+    }
+  }
+
+  async function query(kind) {
+    const category = $("category").value;
+    const { data, roundTripMs } = await api(`/api/products/${kind}?category=${encodeURIComponent(category)}&limit=50`);
+    history.unshift({ source: data.source, category: data.category, total: data.totalRecords, server: data.serverTimeMs, round: roundTripMs });
+    renderLog();
+    renderPreview(data.preview);
+    setStatus(`${data.totalRecords.toLocaleString("es")} registros leídos desde ${data.source} en ${fmt(data.serverTimeMs)} (servidor).`);
+  }
+
+  async function benchmark() {
+    const category = $("category").value;
+    const runs = Math.max(2, Math.min(20, parseInt($("runs").value, 10) || 5));
+    const { data } = await api(`/api/benchmark?category=${encodeURIComponent(category)}&runs=${runs}`);
+    const rows = [
+      ...data.noCacheMs.map((ms, i) => ({ cls: "db", label: `Sin caché · corrida ${i + 1}`, ms })),
+      ...data.cacheMs.map((ms, i) => ({ cls: "cache", label: `Con caché · corrida ${i + 1}${i === 0 ? " (miss)" : " (hit)"}`, ms })),
+    ];
+    const max = Math.max(...rows.map((r) => r.ms));
+    $("bench").innerHTML =
+      `<div class="bars">` +
+      rows.map((r) => `
+        <div class="bar-row">
+          <span class="bar-label">${esc(r.label)}</span>
+          <div class="bar-track"><div class="bar ${r.cls}" style="width:${(r.ms / max) * 100}%"></div></div>
+          <span class="bar-val">${fmt(r.ms)}</span>
+        </div>`).join("") +
+      `</div>
+       <p class="verdict">Promedio sin caché: <strong>${fmt(data.avgNoCacheMs)}</strong> · Promedio con caché (solo hits): <strong>${fmt(data.avgCacheHitMs)}</strong><br>
+       La caché fue <strong>${data.speedup.toLocaleString("es", { maximumFractionDigits: 0 })} veces</strong> más rápida con ${data.totalRecords.toLocaleString("es")} registros.</p>`;
+    setStatus("Benchmark terminado para la categoría " + data.category + ".");
+  }
+
+  async function clearCache() {
+    await api("/api/cache", { method: "DELETE" });
+    setStatus("Caché limpiada. La próxima consulta con caché irá a la base de datos.");
+  }
+
+  function renderLog() {
+    $("log").innerHTML = `<table>
+      <thead><tr><th>Fuente</th><th>Categoría</th><th class="num">Registros</th><th class="num">Tiempo servidor</th><th class="num">Tiempo total (red incl.)</th></tr></thead>
+      <tbody>` + history.map((h) => `<tr>
+        <td><span class="tag ${h.source === "CACHE" ? "cache" : "db"}">${esc(h.source)}</span></td>
+        <td>${esc(h.category)}</td>
+        <td class="num">${h.total.toLocaleString("es")}</td>
+        <td class="num">${fmt(h.server)}</td>
+        <td class="num">${fmt(h.round)}</td></tr>`).join("") + `</tbody></table>`;
+  }
+
+  function renderPreview(items) {
+    if (!items.length) { $("preview").innerHTML = '<p class="empty">Sin registros para esta categoría.</p>'; return; }
+    $("preview").innerHTML = `<table>
+      <thead><tr><th class="num">ID</th><th>Nombre</th><th>Categoría</th><th class="num">Precio</th><th class="num">Stock</th></tr></thead>
+      <tbody>` + items.map((p) => `<tr>
+        <td class="num">${p.id}</td><td>${esc(p.name)}</td><td>${esc(p.category)}</td>
+        <td class="num">$${Number(p.price).toFixed(2)}</td><td class="num">${p.stock}</td></tr>`).join("") + `</tbody></table>`;
+  }
+
+  $("btnNoCache").onclick = () => run("Consultando la base de datos", () => query("no-cache"));
+  $("btnCached").onclick = () => run("Consultando con caché", () => query("cached"));
+  $("btnBench").onclick = () => run("Ejecutando benchmark", benchmark);
+  $("btnClear").onclick = () => run("Limpiando caché", clearCache);
+  $("apiBase").onchange = loadCategories;
+
+  loadCategories();
+</script>
+</body>
+</html>
